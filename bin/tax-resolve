@@ -4,7 +4,7 @@ import sys
 from ete3 import NCBITaxa
 import logging
 
-__version__='1.2.0'
+__version__='1.2.1'
 
 def opts():
     ncbi_ranks = ['subspecies', 'species', 'subgenus', 'genus', 'tribe', 'subfamily',
@@ -19,7 +19,7 @@ def opts():
     parser.add_argument('-t', '--taxids', nargs='?', help="NCBI taxonomy ids (or names) [<stdin>]",
                         type=argparse.FileType('r'), default=sys.stdin)
     parser.add_argument('-r', '--ranks', metavar='rank', nargs='+', help="output rank(s), supported: -r list [genus species]",
-                        default=['genus', 'species'], choices=[ncbi_ranks], type=lambda s: [item for item in s.split(',')])
+                        default=['genus', 'species'], choices=ncbi_ranks)# , type=lambda s: [item for item in s.split(',')])
     parser.add_argument('-n', '--use-names', type=int, choices=range(0,3), default=0, help="0:taxids, 1:names, or 2:names+taxids in output [%(default)s]")
     parser.add_argument('-H', '--no-header', action='store_true', help="omit output header line")
     parser.add_argument('-q', '--quiet', action='store_true', help="omit log messages")
