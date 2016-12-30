@@ -1,10 +1,18 @@
 #!/usr/bin/env python
 import argparse
 import sys
-from ete3 import NCBITaxa
 import logging
+from ete3 import NCBITaxa
 
-__version__='1.2.1'
+__version__='1.2.2'
+
+## parse taxids
+# http://etetoolkit.org/docs/latest/tutorial/tutorial_ncbitaxonomy.html
+# http://biology.stackexchange.com/questions/45031/how-to-get-taxonomic-specific-ids-for-kingdom-phylum-class-order-family-gen
+ncbi = NCBITaxa() # read ncbi tax db
+# ncbi.update_taxonomy_database()
+
+
 
 def opts():
     ncbi_ranks = ['subspecies', 'species', 'subgenus', 'genus', 'tribe', 'subfamily',
@@ -38,12 +46,6 @@ def main():
 
     opt=opts()
 
-    ## parse taxids
-    # http://etetoolkit.org/docs/latest/tutorial/tutorial_ncbitaxonomy.html
-    # http://biology.stackexchange.com/questions/45031/how-to-get-taxonomic-specific-ids-for-kingdom-phylum-class-order-family-gen
-    ncbi = NCBITaxa() # read ncbi tax db
-    # ncbi.update_taxonomy_database()
-
     logging.info("Reading " + opt.taxids.name)
 
     if not opt.no_header:
@@ -76,15 +78,18 @@ def main():
 
         tids=[ranks[rank] for rank in opt.ranks]
         if opt.use_names == 1:
-            tids = ncbi.translate_to_names(tids)
+            tids = ids2names(tids)
         elif opt.use_names == 2:
-            tids = zipl(ncbi.translate_to_names(tids), tids)
+            tids = zipl(ids2names(tids), tids)
 
         print "\t".join(str(x) for x in tids)
 
 
 def zipl(x, y):
     return(val for pair in zip(x, y) for val in pair)
+
+def ids2names(ids):
+    return(x[0] for x in (ncbi.translate_to_names([t]) if t else [t] for t in ids))
 
 if __name__ == '__main__':
     main()
