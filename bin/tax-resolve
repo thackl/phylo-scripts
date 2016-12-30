@@ -29,8 +29,9 @@ def opts():
     parser.add_argument('-r', '--ranks', metavar='rank', nargs='+', help="output rank(s), supported: -r list [genus species]",
                         default=['genus', 'species'], choices=ncbi_ranks)# , type=lambda s: [item for item in s.split(',')])
     parser.add_argument('-n', '--use-names', type=int, choices=range(0,3), default=0, help="0:taxids, 1:names, or 2:names+taxids in output [%(default)s]")
-    parser.add_argument('--NA', metavar='', help="missing data value [%(default)s]", default=None)
+    parser.add_argument('--na', metavar='', help="missing data value [%(default)s]", default=None)
     parser.add_argument('-H', '--no-header', action='store_true', help="omit output header line")
+    parser.add_argument('-c', '--comment', metavar='', help="pass-through lines starting with this character [%(default)s]", default="#")
     parser.add_argument('-q', '--quiet', action='store_true', help="omit log messages")
     parser.add_argument('--version', action='version', version='%(prog)s-'+__version__)
     opt=parser.parse_args()
@@ -60,8 +61,14 @@ def main():
     for tid in opt.taxids: # loop taxids
         tid=tid.rstrip()
 
-        if not tid:
+        if not tid: # pass-through empty lines
+            print
             continue
+
+        if opt.comment and tid[0] == opt.comment: # pass-through empty lines
+            print tid
+            continue
+
         if not tid.isdigit(): # non-numeric value
             trans = ncbi.get_name_translator([tid])
             if tid in trans: # could be translated
