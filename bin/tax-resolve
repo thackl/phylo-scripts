@@ -4,15 +4,12 @@ import sys
 import logging
 from ete3 import NCBITaxa
 
-__version__='1.2.2'
+__version__='1.3.0'
 
 ## parse taxids
 # http://etetoolkit.org/docs/latest/tutorial/tutorial_ncbitaxonomy.html
 # http://biology.stackexchange.com/questions/45031/how-to-get-taxonomic-specific-ids-for-kingdom-phylum-class-order-family-gen
 ncbi = NCBITaxa() # read ncbi tax db
-# ncbi.update_taxonomy_database()
-
-
 
 def opts():
     ncbi_ranks = ['subspecies', 'species', 'subgenus', 'genus', 'tribe', 'subfamily',
@@ -32,6 +29,7 @@ def opts():
     parser.add_argument('--na', metavar='', help="missing data value [%(default)s]", default=None)
     parser.add_argument('-H', '--no-header', action='store_true', help="omit output header line")
     parser.add_argument('-c', '--comment', metavar='', help="pass-through lines starting with this character [%(default)s]", default="#")
+    parser.add_argument('--ncbi-update', action='store_true', help="update the local NCBI Taxonomy database and exit")
     parser.add_argument('-q', '--quiet', action='store_true', help="omit log messages")
     parser.add_argument('--version', action='version', version='%(prog)s-'+__version__)
     opt=parser.parse_args()
@@ -48,6 +46,10 @@ def main():
 
     opt=opts()
 
+    if opt.ncbi_update:
+        ncbi.update_taxonomy_database()
+        sys.exit()
+    
     logging.info("Reading " + opt.taxids.name)
 
     if not opt.no_header:
