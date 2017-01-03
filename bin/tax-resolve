@@ -2,9 +2,10 @@
 import argparse
 import sys
 import logging
+import warnings
 from ete3 import NCBITaxa
 
-__version__='1.3.0'
+__version__='1.5.0'
 
 ## parse taxids
 # http://etetoolkit.org/docs/latest/tutorial/tutorial_ncbitaxonomy.html
@@ -26,7 +27,7 @@ def opts():
     parser.add_argument('-r', '--ranks', metavar='rank', nargs='+', help="output rank(s), supported: -r list [genus species]",
                         default=['genus', 'species'], choices=ncbi_ranks)# , type=lambda s: [item for item in s.split(',')])
     parser.add_argument('-n', '--use-names', type=int, choices=range(0,3), default=0, help="0:taxids, 1:names, or 2:names+taxids in output [%(default)s]")
-    parser.add_argument('--na', metavar='', help="missing data value [%(default)s]", default=None)
+    parser.add_argument('--na', metavar='', nargs=2, help="missing data values for id and name [NA unclassified]", default=["NA", "unclassified"])
     parser.add_argument('-H', '--no-header', action='store_true', help="omit output header line")
     parser.add_argument('-c', '--comment', metavar='', help="pass-through lines starting with this character [%(default)s]", default="#")
     parser.add_argument('--ncbi-update', action='store_true', help="update the local NCBI Taxonomy database and exit")
@@ -49,7 +50,7 @@ def main():
     if opt.ncbi_update:
         ncbi.update_taxonomy_database()
         sys.exit()
-    
+
     logging.info("Reading " + opt.taxids.name)
 
     if not opt.no_header:
@@ -67,7 +68,7 @@ def main():
             print
             continue
 
-        if opt.comment and tid[0] == opt.comment: # pass-through empty lines
+        if opt.comment and tid[0] == opt.comment: # pass-through comment lines
             print tid
             continue
 
@@ -79,21 +80,34 @@ def main():
                 logging.error(" couldn't translate '"+tid+"' into a valid taxid")
                 sys.exit()
 
-        lineage = ncbi.get_rank(ncbi.get_lineage(tid))
+        tid=int(tid) # tid needs to be int for get lineage!
+        with warnings.catch_warnings(record=True) as w:
+            lineage = ncbi.get_lineage(tid)
+            if w:
+                logging.warn("NOTE: deprecated %s" %(w[0].message))
+
+        lineage_ranked = ncbi.get_rank(lineage)
         #print lineage
         ranks = dict(zip(opt.ranks, [None] * len(opt.ranks)))
-        for lid, rank in lineage.items():
+        for lid, rank in lineage_ranked.items():
             if rank in opt.ranks:
                 ranks[rank] = lid
 
         tids=[ranks[rank] for rank in opt.ranks]
-        if opt.use_names == 1:
-            tids = ids2names(tids)
+        if not opt.use_names:
+            if opt.na[0] != None: # replace None with custom NA
+                tids = [x if x else opt.na[0] for x in tids]
+        elif opt.use_names == 1:
+            tnames = ids2names(tids)
+            if opt.na[1] != None: # replace None with custom NA
+                tids = [x if x else opt.na[1] for x in tnames]
         elif opt.use_names == 2:
-            tids = zipl(ids2names(tids), tids)
-
-        if opt.na != None: # replace None with custom NA
-            tids = [x if x else opt.na for x in tids]
+            tnames = ids2names(tids)
+            if opt.na[1] != None: # replace None with custom NA
+                tnames = [x if x else opt.na[1] for x in tnames]
+            if opt.na[0] != None: # replace None with custom NA
+                tids = [x if x else opt.na[0] for x in tids]
+            tids = zipl(tnames, tids)
 
         print "\t".join(str(x) for x in tids)
 
