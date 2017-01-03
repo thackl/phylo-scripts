@@ -67,7 +67,7 @@ def main():
             print
             continue
 
-        if opt.comment and tid[0] == opt.comment: # pass-through empty lines
+        if opt.comment and tid[0] == opt.comment: # pass-through comment lines
             print tid
             continue
 
@@ -79,7 +79,9 @@ def main():
                 logging.error(" couldn't translate '"+tid+"' into a valid taxid")
                 sys.exit()
 
-        lineage = ncbi.get_rank(ncbi.get_lineage(tid))
+        tid=int(tid) # tid needs to be int for get lineage!
+        plain_lineage=ncbi.get_lineage(tid)
+        lineage = ncbi.get_rank(plain_lineage)
         #print lineage
         ranks = dict(zip(opt.ranks, [None] * len(opt.ranks)))
         for lid, rank in lineage.items():
