@@ -2,9 +2,10 @@
 import argparse
 import sys
 import logging
+import warnings
 from ete3 import NCBITaxa
 
-__version__='1.4.0'
+__version__='1.5.0'
 
 ## parse taxids
 # http://etetoolkit.org/docs/latest/tutorial/tutorial_ncbitaxonomy.html
@@ -80,7 +81,11 @@ def main():
                 sys.exit()
 
         tid=int(tid) # tid needs to be int for get lineage!
-        lineage = ncbi.get_lineage(tid)
+        with warnings.catch_warnings(record=True) as w:
+            lineage = ncbi.get_lineage(tid)
+            if w:
+                logging.warn("NOTE: deprecated %s" %(w[0].message))
+
         lineage_ranked = ncbi.get_rank(lineage)
         #print lineage
         ranks = dict(zip(opt.ranks, [None] * len(opt.ranks)))
