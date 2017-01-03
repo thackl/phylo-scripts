@@ -49,7 +49,7 @@ def main():
     if opt.ncbi_update:
         ncbi.update_taxonomy_database()
         sys.exit()
-    
+
     logging.info("Reading " + opt.taxids.name)
 
     if not opt.no_header:
@@ -80,11 +80,11 @@ def main():
                 sys.exit()
 
         tid=int(tid) # tid needs to be int for get lineage!
-        plain_lineage=ncbi.get_lineage(tid)
-        lineage = ncbi.get_rank(plain_lineage)
+        lineage = ncbi.get_lineage(tid)
+        lineage_ranked = ncbi.get_rank(lineage)
         #print lineage
         ranks = dict(zip(opt.ranks, [None] * len(opt.ranks)))
-        for lid, rank in lineage.items():
+        for lid, rank in lineage_ranked.items():
             if rank in opt.ranks:
                 ranks[rank] = lid
 
