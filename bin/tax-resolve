@@ -5,7 +5,7 @@ import logging
 import warnings
 from ete3 import NCBITaxa
 
-__version__='1.6.0'
+__version__='1.6.1'
 
 ## parse taxids
 # http://etetoolkit.org/docs/latest/tutorial/tutorial_ncbitaxonomy.html
@@ -85,8 +85,17 @@ def main():
             if tid in trans: # could be translated
                 tid = str(trans[tid][0])
             else:
-                logging.error(" couldn't translate '"+tid+"' into a valid taxid")
-                sys.exit()
+                logging.warn("NOTE: couldn't translate '"+tid+"' into a valid taxid - treating as NA")
+                if not opt.use_names:
+                    tids = [opt.na[0]] * len(opt.ranks)
+                elif opt.use_names == 1:
+                    tids = [opt.na[1]] * len(opt.ranks)
+                elif opt.use_names == 2:
+                    tids = [opt.na[0]] * len(opt.ranks)
+                    tnames = [opt.na[1]] * len(opt.ranks)
+                    tids = zipl(tnames, tids)
+                print "\t".join(str(x) for x in tids)
+                continue
 
         tid=int(tid) # tid needs to be int for get lineage!
         with warnings.catch_warnings(record=True) as w:
