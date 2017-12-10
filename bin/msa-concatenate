@@ -1,0 +1,73 @@
+#!/usr/bin/env perl
+# Created: 08 Dec 2017
+# Author: Thomas Hackl, thackl@lim4.de
+use warnings;
+use strict;
+
+use Fasta::Parser;
+use Data::Dumper;
+
+# read a set of fasta alignments, concatenate by Organisms from headers
+# (ORG|PROT_ID)
+
+my @msas = @ARGV;
+
+my %C;
+my %O;
+
+print STDERR "reading MSAs\n";
+foreach my $msa (@msas) {
+    my %M;
+    my $fp = Fasta::Parser->new(file => $msa);
+    while (my $fa = $fp->next_seq) {
+        my ($org_id) = $fa->id =~ /^([^|]+)/;
+        $M{$org_id}= $fa->seq;
+        $O{$org_id}++;
+    }
+    $C{$msa} = \%M;
+}
+#print Dumper(\%O, \%C);
+
+
+my %R;
+
+print STDERR "reorganizing and concatenating MSAs\n";
+foreach my $org (sort keys %O) {
+    $R{$org} = '';
+    foreach my $msa(@msas) {
+        my $seq = exists $C{$msa}{$org}
+            ? $C{$msa}{$org}
+            : blank_seq($msa);
+        $R{$org}.= $seq;
+    }
+}
+#print Dumper(\%R);
+
+# partition file for RAxML
+my $part_file = "part.txt";
+my $part_model = "AUTO";
+if ($part_file) {
+    print STDERR "writing partition file ($part_file)\n";
+    open(PF, '>', $part_file) or die $!;
+    my $off = 0;
+    foreach my $msa(@msas){
+        my $sl = length(blank_seq($msa));
+        printf PF "%s, %s=%d-%d\n", $part_model, $msa, $off+1, $off+=$sl;
+    }
+    close PF;
+}
+
+
+print STDERR "writing MSAs\n";
+foreach (sort keys %R) {
+    print Fasta::Seq->new(
+        id => $_,
+        seq => $R{$_})
+}
+
+
+sub blank_seq{
+    my ($msa) = @_;
+    my ($k, $s) = each %{$C{$msa}}; # get random seq
+    return "-" x length($s);
+}
