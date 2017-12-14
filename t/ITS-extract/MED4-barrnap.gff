@@ -1,0 +1,4 @@
+##gff-version 3
+MED4_1	barrnap:0.6	rRNA	313044	314523	0	+	.	Name=16S_rRNA;product=16S ribosomal RNA
+MED4_1	barrnap:0.6	rRNA	315076	317947	0	+	.	Name=23S_rRNA;product=23S ribosomal RNA
+MED4_1	barrnap:0.6	rRNA	318016	318118	5.9e-07	+	.	Name=5S_rRNA;product=5S ribosomal RNA
