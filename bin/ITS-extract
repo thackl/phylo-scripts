@@ -6,6 +6,7 @@ use strict;
 use Getopt::Long  qw(:config no_ignore_case bundling);
 use Data::Dumper;
 use File::Which;
+use File::Temp;
 
 use Fasta::Parser;
 
@@ -16,31 +17,55 @@ use constant {
 };
 
 GetOptions (
+    "bundled|b" => \(my $opt_bundled),
     "help|h!" => \(my $opt_help),
     "debug|D!" => \(my $debug),
 ) or die("Error in command line arguments\n");
 
 if ($opt_help || @ARGV==0){
-    print "Usage: ITS-extract [options] genome.fa > ITS.fa\n";
+    print "Extract ITS sequence from genomic data.\n";
+    print "Runs barrnap or parses precomputed gff.\n\n";
+    
+    print "Usage: ITS-extract [options] { .fa | .fa .gff | .gff-with-seq } > ITS.fa\n";
+    printf " %-19s  %s\n", "-b/--bundled", "GFF contains genome sequence. No extra .fa file required";
     printf " %-19s  %s\n", "-h/--help", "show this help";
     printf " %-19s  %s\n", "-D/--debug", "show debug messages";
     exit 0;
 }
 
-my $barrnap = require_exe("barrnap");
-open(GFF, '-|', "$barrnap $ARGV[0]");
+my $gff_file = $opt_bundled ? $ARGV[0] : $ARGV[1];
+
+my ($tmpfh, $tmpfa) = File::Temp::tempfile() if $opt_bundled;
+
+if ( $gff_file ) {
+    print STDERR "Reading from precomputed gff\n";
+    open(GFF, $gff_file) or die;
+}else {
+    print STDERR "Annotating rRNAs using barrnap\n";
+    my $barrnap = require_exe("barrnap");
+    open(GFF, '-|', "$barrnap --quiet $ARGV[0]");
+}
+
 my %rRNA;
+my $fasta_from_gff = "";
 while (<GFF>) {
-    print STDERR;
+    if (/^##FASTA/){ # cache the FASTA sequence
+        $opt_bundled || last; # only if bundled
+        while (<GFF>) { print $tmpfh $_ }
+        last;
+    }
     next if /^#/;
     chomp();
     my @r = split("\t", $_);
-    $r[8] =~ /Name=(\d+S)_rRNA/;
+    next unless $r[type] eq "rRNA";
+    print STDERR $_, "\n";
+    $r[8] =~ /(\b\d+S\b)/;
     if (exists $rRNA{$1}) {
         die "$1 rRNA has been found multiple times - aborting\n";
     }
     $rRNA{$1} = \@r;
 }
+close GFF;
 
 die "Couldn't find 16S - aborting\n" unless exists $rRNA{"16S"};
 die "Couldn't find 23S - aborting\n" unless exists $rRNA{"23S"};
@@ -64,8 +89,14 @@ $its_end -=1;
 $its_start +=1;
 my $its_length = abs($its_end - $its_start) + 1;
 
-print STDERR "extracting ITS with coordinates $its_start, $its_end, $its_length\n";
-my $fp = Fasta::Parser->new(file=>$ARGV[0]);
+print STDERR "Extracting ITS region: $its_start-$its_end length: $its_length\n";
+my $fp;
+
+if ($opt_bundled){
+    $fp = Fasta::Parser->new(file=>$tmpfa);
+}else {
+    $fp = Fasta::Parser->new(file=>$ARGV[0]);
+}
 
 while (my $fs = $fp->next_seq) {
     if ($fs->id eq $S16[seqid]) {
