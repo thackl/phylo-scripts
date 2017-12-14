@@ -131,7 +131,6 @@ while (my $fs = $fp->next_seq) {
     if ($fs->id eq $S16[seqid]) {
         if ( $debug ) {
             qx(cp $tmpfa .);
-            
             print STDERR $fs;
             print STDERR length($fs->seq),"\n";
             print STDERR "$its_start,$its_length\n";
@@ -141,7 +140,7 @@ while (my $fs = $fp->next_seq) {
         $fs->id($opt_id // "$S16[seqid]-its");
         $fs->desc("seqid=$S16[seqid] start=$its_start end=$its_end length=$its_length fasta=$source_seq gff=$source_anno");
         if ($S16[strand] eq "-") {
-  #          $fs=$fs->reverse_complement;
+            $fs=$fs->reverse_complement;
         }
         print $fs;
         last;
