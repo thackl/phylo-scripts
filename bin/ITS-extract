@@ -1,0 +1,94 @@
+#!/usr/bin/env perl
+# Created: 13 Dec 2017
+# Author: Thomas Hackl, thackl@lim4.de
+use warnings;
+use strict;
+use Getopt::Long  qw(:config no_ignore_case bundling);
+use Data::Dumper;
+use File::Which;
+
+use Fasta::Parser;
+
+# gff fields
+use constant {
+    seqid => 0, source => 1, type => 2, start  => 3, end => 4,
+    score => 5, strand => 6, phase => 7, attributes => 8
+};
+
+GetOptions (
+    "help|h!" => \(my $opt_help),
+    "debug|D!" => \(my $debug),
+) or die("Error in command line arguments\n");
+
+if ($opt_help || @ARGV==0){
+    print "Usage: ITS-extract [options] genome.fa > ITS.fa\n";
+    printf " %-19s  %s\n", "-h/--help", "show this help";
+    printf " %-19s  %s\n", "-D/--debug", "show debug messages";
+    exit 0;
+}
+
+my $barrnap = require_exe("barrnap");
+open(GFF, '-|', "$barrnap $ARGV[0]");
+my %rRNA;
+while (<GFF>) {
+    print STDERR;
+    next if /^#/;
+    chomp();
+    my @r = split("\t", $_);
+    $r[8] =~ /Name=(\d+S)_rRNA/;
+    if (exists $rRNA{$1}) {
+        die "$1 rRNA has been found multiple times - aborting\n";
+    }
+    $rRNA{$1} = \@r;
+}
+
+die "Couldn't find 16S - aborting\n" unless exists $rRNA{"16S"};
+die "Couldn't find 23S - aborting\n" unless exists $rRNA{"23S"};
+
+my @S16 = @{$rRNA{"16S"}};
+my @S23 = @{$rRNA{"23S"}};
+
+# need on same contig
+if ($S16[seqid] ne $S16[seqid] or $S16[strand] ne $S23[strand]){
+    die "16S and 23S rRNAs are not on the same contig/same strand - aborting\n";
+}
+
+my ($its_start, $its_end);
+if ($S16[strand] eq "+") {
+    ($its_start, $its_end) = ($S16[end], $S23[start]);
+}else {
+    ($its_start, $its_end) = ($S23[end], $S16[start]);
+}
+
+$its_end -=1;
+$its_start +=1;
+my $its_length = abs($its_end - $its_start) + 1;
+
+print STDERR "extracting ITS with coordinates $its_start, $its_end, $its_length\n";
+my $fp = Fasta::Parser->new(file=>$ARGV[0]);
+
+while (my $fs = $fp->next_seq) {
+    if ($fs->id eq $S16[seqid]) {
+        $fs = $fs->substr_seq($its_start-1, $its_length); # perl coords 0-offset
+        $fs->id("ITS");
+        if ($S16[strand] eq "-") {
+            $fs=$fs->reverse_complement;
+        }
+        print $fs;
+        last;
+    }
+}
+
+
+
+
+################################################################################
+
+sub require_exe{
+    my $exe = my $fexe = shift;
+    unless ((-e $fexe && -x _) || (($fexe = which($exe)) && -e $fexe && -x _ )){
+        warn("$exe .. failed");
+        die "$exe not found/executable\n";
+    }
+    return $fexe;
+}
