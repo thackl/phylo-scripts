@@ -7,7 +7,7 @@ use Getopt::Long  qw(:config no_ignore_case bundling);
 use Data::Dumper;
 use File::Which;
 use File::Temp;
-
+use File::Basename;
 use Fasta::Parser;
 
 # gff fields
@@ -57,7 +57,7 @@ my $fasta_from_gff = "";
 while (<GFF>) {
     if (/^##FASTA/){ # cache the FASTA sequence
         $opt_bundled || last; # only if bundled
-        while (<GFF>) { print $tmpfh $_ }
+        while (<GFF>) { print $tmpfh $_; }
         last;
     }
     next if /^#/;
@@ -71,6 +71,7 @@ while (<GFF>) {
     }
     $rRNA{$1} = \@r;
 }
+close $tmpfh; # this is important - reading directly gives incomplete data (buffering)
 close GFF;
 
 die "Couldn't find 16S - aborting\n" unless exists $rRNA{"16S"};
@@ -114,23 +115,33 @@ if ($opt_bundled){
 my $source_anno;
 my $source_seq;
 if ($opt_bundled) {
-    $source_anno = $gff_file;
-    $source_seq = $gff_file;
+    $source_anno = basename($gff_file);
+    $source_seq = basename($gff_file);
 }elsif ($gff_file) {
-    $source_anno = $gff_file;
-    $source_seq = $ARGV[0];
+    $source_anno = basename($gff_file);
+    $source_seq = basename($ARGV[0]);
 }else {
-    $source_anno = $S16[source];
-    $source_seq = $ARGV[0];
+    $source_anno = basename($S16[source]);
+    $source_seq = basename($ARGV[0]);
 }
+
+$debug && print STDERR join("\t", @S16), "\n", join("\t", @S23), "\n";
 
 while (my $fs = $fp->next_seq) {
     if ($fs->id eq $S16[seqid]) {
+        if ( $debug ) {
+            qx(cp $tmpfa .);
+            
+            print STDERR $fs;
+            print STDERR length($fs->seq),"\n";
+            print STDERR "$its_start,$its_length\n";
+        }
+            
         $fs = $fs->substr_seq($its_start-1, $its_length); # perl coords 0-offset
         $fs->id($opt_id // "$S16[seqid]-its");
-        $fs->desc("seqid=$S16[seqid] start=$its_start end=$its_end fasta=$source_seq gff=$source_anno");
+        $fs->desc("seqid=$S16[seqid] start=$its_start end=$its_end length=$its_length fasta=$source_seq gff=$source_anno");
         if ($S16[strand] eq "-") {
-            $fs=$fs->reverse_complement;
+  #          $fs=$fs->reverse_complement;
         }
         print $fs;
         last;
