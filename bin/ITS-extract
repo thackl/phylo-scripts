@@ -17,7 +17,8 @@ use constant {
 };
 
 GetOptions (
-    "bundled|b" => \(my $opt_bundled),
+    "id|i=s" => \(my $opt_id),
+    "bundled|b!" => \(my $opt_bundled),
     "help|h!" => \(my $opt_help),
     "debug|D!" => \(my $debug),
 ) or die("Error in command line arguments\n");
@@ -27,6 +28,7 @@ if ($opt_help || @ARGV==0){
     print "Runs barrnap or parses precomputed gff.\n\n";
     
     print "Usage: ITS-extract [options] { .fa | .fa .gff | .gff-with-seq } > ITS.fa\n";
+    printf " %-19s  %s\n", "-i/--id", "ID for the extracted sequence [seqid-its]";
     printf " %-19s  %s\n", "-b/--bundled", "GFF contains genome sequence. No extra .fa file required";
     printf " %-19s  %s\n", "-h/--help", "show this help";
     printf " %-19s  %s\n", "-D/--debug", "show debug messages";
@@ -98,10 +100,24 @@ if ($opt_bundled){
     $fp = Fasta::Parser->new(file=>$ARGV[0]);
 }
 
+my $source_anno;
+my $source_seq;
+if ($opt_bundled) {
+    $source_anno = $gff_file;
+    $source_seq = $gff_file;
+}elsif ($gff_file) {
+    $source_anno = $gff_file;
+    $source_seq = $ARGV[0];
+}else {
+    $source_anno = $S16[source];
+    $source_seq = $ARGV[0];
+}
+
 while (my $fs = $fp->next_seq) {
     if ($fs->id eq $S16[seqid]) {
         $fs = $fs->substr_seq($its_start-1, $its_length); # perl coords 0-offset
-        $fs->id("ITS");
+        $fs->id($opt_id // "$S16[seqid]-its");
+        $fs->desc("seqid=$S16[seqid] start=$its_start end=$its_end fasta=$source_seq gff=$source_anno");
         if ($S16[strand] eq "-") {
             $fs=$fs->reverse_complement;
         }
