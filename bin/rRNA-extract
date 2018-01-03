@@ -13,52 +13,89 @@ use Fasta::Parser;
 # gff fields
 use constant {
     seqid => 0, source => 1, type => 2, start  => 3, end => 4,
-    score => 5, strand => 6, phase => 7, attributes => 8
+    score => 5, strand => 6, phase => 7, attributes => 8,
+    len => 9, target => 10 # custom
 };
 
 GetOptions (
+    "targets|t=s" => \(my $opt_targets = "16S,ITS"),
     "min-length|l=i" => \(my $opt_min_length = 400),
     "max-length|L=i" => \(my $opt_max_length = 1500),
+    "strip|s!" => \(my $opt_strip = 1),
     "id|i=s" => \(my $opt_id),
-    "bundled|b!" => \(my $opt_bundled),
     "barrnap-opt|B=s" => \(my $opt_barrnap = "--quiet"),
     "help|h!" => \(my $opt_help),
     "debug|D!" => \(my $debug),
 ) or die("Error in command line arguments\n");
 
 if ($opt_help || @ARGV==0){
-    print "Extract ITS sequence from genomic data.\n";
+    print "Extract rRNA and ITS sequences from genomic data.\n";
     print "Runs barrnap or parses precomputed gff.\n\n";
-    
-    print "Usage: ITS-extract [options] { .fa | .fa .gff | .gff-with-seq } > ITS.fa\n";
-    printf " %-19s  %s\n", "-i/--id", "ID for the extracted sequence [seqid-its]";
+
+    print "Usage: ".(basename($0))." [options] { .fa | .fa .gff | .gff-with-seq } > rRNAs.fa\n";
+    printf " %-19s  %s\n", "-t/--targets", "rRNAs and spacer to extract [$opt_targets]";
+    printf " %-19s  %s\n", "-s/--strip", "try to strip contig counter from end of sequence IDs used as prefixes [ON]";
+    printf " %-19s  %s\n", "-i/--id", "ID prefix for the extracted sequence [<seqid>-<target>]";
     printf " %-19s  %s\n", "-l/--min-length", "Ignore ITS annotated shorter than [$opt_min_length]";
     printf " %-19s  %s\n", "-L/--max-length", "Ignore ITS annotated longer than [$opt_max_length]";
-    printf " %-19s  %s\n", "-b/--bundled", "GFF contains genome sequence. No extra .fa file required";
     printf " %-19s  %s\n", "-B/--barrnap-opt", "Pass-through options for barrnap [$opt_barrnap]";
     printf " %-19s  %s\n", "-h/--help", "show this help";
     printf " %-19s  %s\n", "-D/--debug", "show debug messages";
     exit 0;
 }
 
-my $gff_file = $opt_bundled ? $ARGV[0] : $ARGV[1];
+# prep input files
+my $fa_file = $ARGV[0];
+my $gff_file = $ARGV[1];
+my $fp;
+my ($tmpfh, $tmpfa);
+my $bundled = 0;
 
-my ($tmpfh, $tmpfa) = File::Temp::tempfile() if $opt_bundled;
-
-if ( $gff_file ) {
-    print STDERR "Reading from precomputed gff\n";
-    open(GFF, $gff_file) or die;
-}else {
-    print STDERR "Annotating rRNAs using barrnap\n";
-    my $barrnap = require_exe("barrnap");
-    open(GFF, '-|', "$barrnap $opt_barrnap $ARGV[0]");
+if (@ARGV==2) { # assume gff and fasta
+    if ($fp = Fasta::Parser->new(file=>$fa_file)->check_format){
+        print STDERR "Reading from FASTA and precomputed GFF\n";
+    }elsif ($fp = Fasta::Parser->new(file=>$ARGV[1])->check_format){ # try GFF/FA
+        print STDERR "Reading from precomputed GFF and FASTA\n";
+        $fa_file = $ARGV[1];
+        $gff_file = $ARGV[0];
+    }
+    open(GFF, $gff_file) or die $!;
+}elsif (@ARGV==1) { # fasta/barnapp or bundled GFF
+    if ($fp = Fasta::Parser->new(file=>$fa_file)->check_format){
+        print STDERR "Reading from FASTA, annotating rRNAs using barrnap\n";
+        my $barrnap = require_exe("barrnap");
+        open(GFF, '-|', "$barrnap $opt_barrnap $ARGV[0]") or die $!;
+    }else {
+        print STDERR "Reading from precomputed GFF, assuming FASTA sequence at the end\n";
+        $bundled++;
+        $gff_file = $ARGV[0];
+        open(GFF, $gff_file) or die $!;
+        ($tmpfh, $tmpfa) = File::Temp::tempfile(); # cache FASTA from GFF
+        $fp = Fasta::Parser->new(file=>$tmpfa);
+    }
 }
 
-my %rRNA;
+$debug && print STDERR Dumper({fa_file => $fa_file, gff_file => $gff_file, bundled => $bundled});
+
+# prep targets
+my @targets_all = qw(5S 16S 23S ITS);
+my %targets; $targets{$_} = 0  for @targets_all;
+my %found; $found{$_} = [] for @targets_all;
+
+for (split(',', $opt_targets )) {
+    die "Unknown target - aborting\nChoices: ".(join(",", @targets_all))."\n" unless exists $targets{$_};
+    $targets{$_}++;
+}
+my @targets = grep{$targets{$_}}@targets_all;
+
+$debug && print STDERR Dumper(\%targets);
+
+# read input
 my $fasta_from_gff = "";
+my $found_c = 0;
 while (<GFF>) {
     if (/^##FASTA/){ # cache the FASTA sequence
-        $opt_bundled || last; # only if bundled
+        $bundled || last; # only if bundled
         while (<GFF>) { print $tmpfh $_; }
         last;
     }
@@ -66,88 +103,135 @@ while (<GFF>) {
     chomp();
     my @r = split("\t", $_);
     next unless $r[type] eq "rRNA";
-    print STDERR $_, "\n";
+
+    $r[start] -= 1; # 0-offset
+    $r[len] = $r[end] - $r[start];
     $r[8] =~ /(\b\d+S\b)/;
-    if (exists $rRNA{$1}) {
-        die "$1 rRNA has been found multiple times - aborting\n";
-    }
-    $rRNA{$1} = \@r;
+
+    # store all rRNAs (ITS needs 16S/23S even if not targets
+    $debug && print STDERR Dumper(\@r);
+    # only count targets and dependencies
+    $found_c++ if($targets{$1} or ($targets{ITS} && grep{$1}qw(16S 23S))); # TODO: untested
+    push @{$found{$1}}, \@r;
 }
 close $tmpfh if $tmpfh; # this is important - reading directly gives incomplete data (buffering)
 close GFF;
 
-die "Couldn't find 16S - aborting\n" unless exists $rRNA{"16S"};
-die "Couldn't find 23S - aborting\n" unless exists $rRNA{"23S"};
-
-my @S16 = @{$rRNA{"16S"}};
-my @S23 = @{$rRNA{"23S"}};
-
-# need on same contig
-if ($S16[seqid] ne $S16[seqid] or $S16[strand] ne $S23[strand]){
-    die "16S and 23S rRNAs are not on the same contig/same strand - aborting\n";
+# stop here if no targets/dependencies found
+unless ($found_c) {
+    print STDERR "No target rRNAs found - exiting\n";
+    exit 0;
 }
 
-my ($its_start, $its_end);
-if ($S16[strand] eq "+") {
-    ($its_start, $its_end) = ($S16[end], $S23[start]);
-}else {
-    ($its_start, $its_end) = ($S23[end], $S16[start]);
+# analyze matched targets
+if (exists $targets{ITS}) {
+
+    unless (@{$found{"16S"}}){
+        print STDERR "Couldn't find 16S - skipping ITS extraction\n";
+        $targets{ITS} = 0;
+    }
+    unless (@{$found{"23S"}}){
+        print STDERR "Couldn't find 23S - skipping ITS extraction\n";
+        $targets{ITS} = 0;
+    }
+
+    if ( @{$found{"16S"}} >1 || @{$found{"23S"}} >1 ){
+        die "Found multiple 16S/23S copies - not yet supported\n";
+        $targets{ITS} = 0;
+    }
+
+    my @S16 = @{$found{"16S"}[0]};
+    my @S23 = @{$found{"23S"}[0]};
+
+    # need on same contig
+    if ($S16[seqid] ne $S16[seqid] or $S16[strand] ne $S23[strand]){
+        print STDERR "16S and 23S rRNAs are not on the same contig/same strand - skipping ITS extraction\n";
+    }
+
+    my @ITS = @S16;
+    $ITS[type] = 'ITS';
+    $ITS[attributes] = 'Name=16S-23S_ITS;product=16S-23S internal transcribed spacer';
+    ($ITS[start], $ITS[end]) = $S16[strand] eq "+"
+        ? ($S16[end], $S23[start])
+        : ($S23[end], $S16[start]);
+    $ITS[len] = $ITS[end] - $ITS[start];
+
+    if ($ITS[len] < $opt_min_length) {
+        print STDERR "Annotated ITS length ($ITS[len]) < minimum length ($opt_min_length) - skipping ITS extraction\n";
+    }
+    if ($ITS[len] > $opt_max_length) {
+        print STDERR "Annotated ITS length ($ITS[len]) > maximum length ($opt_max_length) - skipping ITS extraction\n";
+    }
+
+    push @{$found{"ITS"}}, \@ITS;
+} # end ITS
+
+
+$debug && print STDERR Dumper(\%found);
+
+# TODO: print GFF to file
+foreach (@targets) {
+    foreach my $r (@{$found{$_}}){
+        my @gff = @$r[0..8];
+        $gff[start]+=1; # 1-offset GFF
+        print STDERR join("\t", @gff), "\n"
+    }
 }
 
-$its_end -=1;
-$its_start +=1;
-my $its_length = abs($its_end - $its_start) + 1;
-
-if ($its_length < $opt_min_length) {
-    die "Annotated ITS length ($its_length) < minimum length ($opt_min_length) - exiting\n";
-}
-if ($its_length > $opt_max_length) {
-    die "Annotated ITS length ($its_length) > maximum length ($opt_max_length) - exiting\n";
+my %target_seqs;
+foreach my $t (@targets) {
+    foreach my $r (@{$found{$t}}){
+        $target_seqs{$r->[seqid]} = [] unless exists $target_seqs{$r->[seqid]};
+        $r->[target] = $t;
+        push @{$target_seqs{$r->[seqid]}}, $r;
+    }
 }
 
-print STDERR "Extracting ITS region: $its_start-$its_end length: $its_length\n";
-my $fp;
+$debug && print STDERR Dumper(\%target_seqs);
 
-if ($opt_bundled){
-    $fp = Fasta::Parser->new(file=>$tmpfa);
-}else {
-    $fp = Fasta::Parser->new(file=>$ARGV[0]);
-}
 
+# some meta info for the description
 my $source_anno;
 my $source_seq;
-if ($opt_bundled) {
+if ($bundled) {
     $source_anno = basename($gff_file);
     $source_seq = basename($gff_file);
 }elsif ($gff_file) {
     $source_anno = basename($gff_file);
-    $source_seq = basename($ARGV[0]);
+    $source_seq = basename($fa_file);
 }else {
-    $source_anno = basename($S16[source]);
-    $source_seq = basename($ARGV[0]);
+    $source_anno =$target_seqs{(keys %target_seqs)[0]}[0][source];
+    $source_seq = basename($fa_file);
 }
 
-$debug && print STDERR join("\t", @S16), "\n", join("\t", @S23), "\n";
+
+
+# TODO: convert GFF coordinates to perl substr
+## $debug && qx(cp $tmpfa .);
 
 while (my $fs = $fp->next_seq) {
-    if ($fs->id eq $S16[seqid]) {
-        if ( $debug ) {
-            qx(cp $tmpfa .);
-            print STDERR $fs;
-            print STDERR length($fs->seq),"\n";
-            print STDERR "$its_start,$its_length\n";
-        }
-            
-        $fs = $fs->substr_seq($its_start-1, $its_length); # perl coords 0-offset
-        $fs->id($opt_id // "$S16[seqid]-its");
-        $fs->desc("seqid=$S16[seqid] start=$its_start end=$its_end length=$its_length fasta=$source_seq gff=$source_anno");
-        if ($S16[strand] eq "-") {
-            $fs=$fs->reverse_complement;
-        }
-        print $fs;
-        last;
-    }
-}
+    if ($target_seqs{$fs->id}) {
+         foreach my $t (@{$target_seqs{$fs->id}}) {
+             if ( $debug ) {
+                 print STDERR "@$t\n";
+             }
+
+             my $ts = $fs->substr_seq($t->[start], $t->[len]); # perl coords 0-offset
+             my $id;
+             if (!defined($opt_id)) {
+                 $id = $t->[seqid];
+                 $id =~ s/[-._]\d+$// if $opt_strip; # try to strip contig numbers
+             }
+             $id = $opt_id // $id;
+             $ts->id($id."-$t->[target]");
+             $ts->desc("name=$t->[target] source=$t->[seqid] start=$t->[start] ".
+                           "end=$t->[end] length=$t->[len] strand=$t->[strand] ".
+                           "fasta=$source_seq gff=$source_anno");
+             $ts=$ts->reverse_complement if $t->[strand] eq "-";
+             print $ts;
+         }
+     }
+ }
 
 
 
