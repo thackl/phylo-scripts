@@ -1,0 +1,58 @@
+#!/usr/bin/env perl
+# Created: 17 Mar 2018
+# Author: Thomas Hackl, thackl@lim4.de
+use warnings;
+use strict;
+
+use Getopt::Long  qw(:config no_ignore_case bundling);
+use Data::Dumper;
+use Fasta::Parser;
+use File::Basename;
+
+GetOptions (
+    "keep-stop|s" => \(my $opt_keep_stop),
+    "help|h!" => \(my $opt_help),
+    "debug|D!" => \(my $debug),
+) or die("Error in command line arguments\n");
+
+if ($opt_help || @ARGV==0){
+    print "Replace AAs in multiple sequence alignment with codons from nucleotide sequences.\n";
+
+    print "Usage: ".(basename($0))." [options] AA-msa.fa Nuc.fa > Nuc-msa.fa\n";
+    printf " %-19s  %s\n", "-h/--help", "show this help";
+    printf " %-19s  %s\n", "-D/--debug", "show debug messages";
+    exit 0;
+}
+
+my $faa_file = $ARGV[0];
+my $fap = Fasta::Parser->new(file => $faa_file);
+
+my $fna_file = $ARGV[1];
+my $fnp = Fasta::Parser->new(file => $fna_file);
+
+my %N;
+while (my $fns = $fnp->next_seq){
+    $N{$fns->id} = $fns
+}
+
+while (my $faa = $fap->next_seq()) {
+    my $id = $faa->id;
+    
+    die "Can't find nucleotides for $id" unless exists $N{$id};
+    my $fns = $N{$id};
+    
+    my $faa_len = $faa->seq =~ tr/-//c;
+    my $fns_len = length($fns->seq);
+    die "Not enough nucleotides for $id" if $faa_len > $fns_len/3;
+    warn "More nucleotides than AAs. This only makes sense if your nucleotide sequence continues after a stop codon. Make sure you are using the right data" if $faa_len < ($fns_len/3 -1); # allow extra stop codon
+
+    my @faa = split('', $faa->seq);
+    my @fns = unpack('(A3)*', $fns->seq);
+    my @fna = map{$_ eq '-' ? '---' : shift @fns}@faa;
+    if ($opt_keep_stop) {
+        push @fna, shift @fns; # append stop
+    }
+    $fns->seq(join('', @fna));
+    print $fns;
+}
+
