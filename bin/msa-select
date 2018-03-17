@@ -19,7 +19,7 @@ GetOptions (
 sub usage{
     return "Select columns from an MSA, even if column spec is in AA space and MSA is codon-translated.\n".
     "Usage: ".(basename($0))." [options] -c columns msa.fa > msa-cols.fa\n".
-    (sprintf " %-19s  %s\n", "-c/--columns", "comma-separated list of columns to select (1-offset)").
+    (sprintf " %-19s  %s\n", "-c/--columns", "comma-separated list of columns to select (0-offset)").
     (sprintf " %-19s  %s\n", "-3/--codon", "column numbers refer to codons, not single characters (1-offset)").
     (sprintf " %-19s  %s\n", "-h/--help", "show this help").
     (sprintf " %-19s  %s\n", "-D/--debug", "show debug messages");
@@ -28,7 +28,7 @@ sub usage{
 if ($opt_help || @ARGV==0){ print usage(); exit 0 }
 if (! defined($opt_columns)) { print STDERR usage(), "\n-c required.\n" ; exit 1}
 
-my @cols = map{$_-1}split(',', $opt_columns); # perl needs 0-offset
+my @cols = map{$_+0}split(',', $opt_columns);
 
 if ($opt_codon) {
     my @tmp;
