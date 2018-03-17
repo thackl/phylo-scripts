@@ -1,0 +1,48 @@
+#!/usr/bin/env perl
+# Created: 17 Mar 2018
+# Author: Thomas Hackl, thackl@lim4.de
+use warnings;
+use strict;
+
+use Getopt::Long  qw(:config no_ignore_case bundling);
+use Data::Dumper;
+use Fasta::Parser;
+use File::Basename;
+
+GetOptions (
+    "columns|c=s" => \(my $opt_columns),
+    "codon|3!" => \(my $opt_codon),
+    "help|h!" => \(my $opt_help),
+    "debug|D!" => \(my $debug),
+) or die("Error in command line arguments\n");
+
+sub usage{
+    return "Select columns from an MSA, even if column spec is in AA space and MSA is codon-translated.\n".
+    "Usage: ".(basename($0))." [options] -c columns msa.fa > msa-cols.fa\n".
+    (sprintf " %-19s  %s\n", "-c/--columns", "comma-separated list of columns to select (1-offset)").
+    (sprintf " %-19s  %s\n", "-3/--codon", "column numbers refer to codons, not single characters (1-offset)").
+    (sprintf " %-19s  %s\n", "-h/--help", "show this help").
+    (sprintf " %-19s  %s\n", "-D/--debug", "show debug messages");
+}
+
+if ($opt_help || @ARGV==0){ print usage(); exit 0 }
+if (! defined($opt_columns)) { print STDERR usage(), "\n-c required.\n" ; exit 1}
+
+my @cols = map{$_-1}split(',', $opt_columns); # perl needs 0-offset
+
+if ($opt_codon) {
+    my @tmp;
+    foreach (@cols) {
+        push @tmp, $_*3, $_*3+1, $_*3+2; 
+    }
+    @cols = @tmp;
+}
+
+my $fp = Fasta::Parser->new(file => $ARGV[0]);
+
+while (my $fs = $fp->next_seq()) {
+    my @fs = (split('', $fs->seq))[@cols];
+    $fs->seq(join('', @fs));
+    print $fs;
+}
+
