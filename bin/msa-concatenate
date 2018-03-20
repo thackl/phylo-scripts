@@ -37,7 +37,7 @@ foreach my $org (sort keys %O) {
     foreach my $msa(@msas) {
         my $seq = exists $C{$msa}{$org}
             ? $C{$msa}{$org}
-            : blank_seq($msa);
+            : blank_seq($msa, $org);
         $R{$org}.= $seq;
     }
 }
@@ -67,7 +67,7 @@ foreach (sort keys %R) {
 
 
 sub blank_seq{
-    my ($msa) = @_;
-    my ($k, $s) = each %{$C{$msa}}; # get random seq
-    return "-" x length($s);
+    my ($msa, $org) = @_;
+    my ($k) = keys %{$C{$msa}};  # get random key
+    return "-" x length($C{$msa}{$k});
 }
