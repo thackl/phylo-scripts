@@ -3,35 +3,74 @@
 # Author: Thomas Hackl, thackl@lim4.de
 use warnings;
 use strict;
-
-use Fasta::Parser;
+use Getopt::Long  qw(:config no_ignore_case bundling);
 use Data::Dumper;
+use Fasta::Parser;
 
-# read a set of fasta alignments, concatenate by Organisms from headers
-# (ORG|PROT_ID)
+my $out_file;
+
+GetOptions (
+    "regex|r=s" => \(my $regex),
+    "raxml-part|p:s" => \(my $part_file),
+    "raxml-model|m" => \(my $part_model = "AUTO"),
+    "out|o=s" => sub { '-' ne $_[1] and open(STDOUT, '>', $_[1]) and $out_file=$_[1] || die $! },
+    "help|h!" => \(my $help),
+    "debug|D!" => \(my $debug),
+) or die("Error in command line arguments\n");
+
+if (defined($part_file) && "" eq $part_file){
+    defined($out_file) || die "Writing to STDOUT, need explicit name for partition file";
+    $part_file = $out_file.".part";
+}
+
+if ($help || @ARGV < 2){
+    print "Concatenate multiple fasta alignment files by common IDs.\n";
+    print "Add gaps for missing sequences.\n";
+    print "\n";
+    print "Usage: msa-concatenate.pl msa1.fa msa2.fa [msa3.fa ...] > out\n";
+    printf " %-19s  %s\n", "-r/--regex", "perl regex to manipulate IDs before matching between files,";
+    printf " %-19s  %s\n", "", "i.e. extract organism ID from gene/protein ID;";
+    printf " %-19s  %s\n", "-p/--part", "write partition info to this file [$out_file.part]";
+    printf " %-19s  %s\n", "-m/--model", "model for partition file [$part_model]";
+    printf " %-19s  %s\n", "-o/--out", "write to this file [STDOUT]";
+    printf " %-19s  %s\n", "-h/--help", "show this help";
+    printf " %-19s  %s\n", "-D/--debug", "show debug messages";
+
+    exit 0;
+}
 
 my @msas = @ARGV;
+my $match_sub = match_sub($regex);
 
 my %C;
 my %O;
+my $seq_count;
 
 print STDERR "reading MSAs\n";
 foreach my $msa (@msas) {
     my %M;
     my $fp = Fasta::Parser->new(file => $msa);
     while (my $fa = $fp->next_seq) {
-        my ($org_id) = $fa->id =~ /^([^|]+)/;
+        my $org_id = &$match_sub($fa->id);
+        if (!defined $org_id or "" eq $org_id) {
+            die "Bad regex: doesn't match '".($fa->id)."' from $msa\n";
+        }
+        $seq_count++;
         $M{$org_id}= $fa->seq;
         $O{$org_id}++;
     }
     $C{$msa} = \%M;
 }
-#print Dumper(\%O, \%C);
+$debug && print Dumper(\%O, \%C);
+my $org_count = keys %O;
+my $msa_count = @msas;
 
+if ($seq_count == $org_count) {
+    die "Failed to match any sequences by ID. Make sure IDs match between files\n try --regex to manipulate partially matching gene/protein IDs\n";
+}
 
 my %R;
-
-print STDERR "reorganizing and concatenating MSAs\n";
+print STDERR "concatenating $msa_count MSAs into one MSA with $org_count sequences\n";
 foreach my $org (sort keys %O) {
     $R{$org} = '';
     foreach my $msa(@msas) {
@@ -44,8 +83,6 @@ foreach my $org (sort keys %O) {
 #print Dumper(\%R);
 
 # partition file for RAxML
-my $part_file = "part.txt";
-my $part_model = "AUTO";
 if ($part_file) {
     print STDERR "writing partition file ($part_file)\n";
     open(PF, '>', $part_file) or die $!;
@@ -70,4 +107,20 @@ sub blank_seq{
     my ($msa, $org) = @_;
     my ($k) = keys %{$C{$msa}};  # get random key
     return "-" x length($C{$msa}{$k});
+}
+
+# precompile match sub from regex string
+sub match_sub{
+    my $regex = shift;
+    my $sub;
+    if (!defined($regex) or "" eq $regex) {
+        $sub = sub { $_[0]; };
+    }elsif ($regex =~ /^s/) {
+        $sub = eval "sub { \$_[0] =~ $regex; \$_[0] }";
+    }elsif ($regex =~ /^m?\//) {
+        $sub = eval "sub { \$_[0] =~ $regex; \$1 }";
+    }else {
+        die "Bad regex: need '/', 'm/', or 's/' at the start\n";
+    }
+    $sub // die "Bad regex: $@\n";
 }
