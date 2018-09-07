@@ -7,7 +7,7 @@ use Getopt::Long  qw(:config no_ignore_case bundling);
 use Data::Dumper;
 use Fasta::Parser;
 
-my $out_file;
+my $out_file = '-';
 
 GetOptions (
     "regex|r=s" => \(my $regex),
@@ -19,18 +19,19 @@ GetOptions (
 ) or die("Error in command line arguments\n");
 
 if (defined($part_file) && "" eq $part_file){
-    defined($out_file) || die "Writing to STDOUT, need explicit name for partition file";
+    $out_file == "-" || die "Writing to STDOUT, need explicit name for partition file";
     $part_file = $out_file.".part";
 }
 
 if ($help || @ARGV < 2){
+    print "Need at least 2 MSAs\n\n" if @ARGV == 1;
     print "Concatenate multiple fasta alignment files by common IDs.\n";
     print "Add gaps for missing sequences.\n";
     print "\n";
     print "Usage: msa-concatenate.pl msa1.fa msa2.fa [msa3.fa ...] > out\n";
     printf " %-19s  %s\n", "-r/--regex", "perl regex to manipulate IDs before matching between files,";
     printf " %-19s  %s\n", "", "i.e. extract organism ID from gene/protein ID;";
-    printf " %-19s  %s\n", "-p/--part", "write partition info to this file [$out_file.part]";
+    printf " %-19s  %s\n", "-p/--part", "write partition info to this file [out.part]";
     printf " %-19s  %s\n", "-m/--model", "model for partition file [$part_model]";
     printf " %-19s  %s\n", "-o/--out", "write to this file [STDOUT]";
     printf " %-19s  %s\n", "-h/--help", "show this help";
@@ -49,7 +50,8 @@ my $seq_count;
 print STDERR "reading MSAs\n";
 foreach my $msa (@msas) {
     my %M;
-    my $fp = Fasta::Parser->new(file => $msa);
+    my $fp = Fasta::Parser->new(file => $msa)->check_format() //
+        die "Doesn't look like fasta: $msa";
     while (my $fa = $fp->next_seq) {
         my $org_id = &$match_sub($fa->id);
         if (!defined $org_id or "" eq $org_id) {
