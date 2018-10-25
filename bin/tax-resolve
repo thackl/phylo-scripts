@@ -61,7 +61,7 @@ def opts():
 
     ## parse args
     parser = argparse.ArgumentParser(
-        description='Get lineages for given taxids, and return full lineage certain level(s)')
+        description='Get lineages for taxids/taxnames. Reads last column in multi-column input.')
     parser.add_argument('-t', '--taxids', nargs='?', help="NCBI taxonomy ids (or names) [<stdin>]",
                         type=argparse.FileType('r'), default=sys.stdin)
     parser.add_argument('-r', '--ranks', metavar='rank', nargs=1, help="output rank(s), supported: -r list [%(default)s]",
@@ -96,6 +96,8 @@ def main():
     logging.info("Reading " + opt.taxids.name)
 
     if not opt.no_header:
+        logging.info("Treating first line in input as header (toggle with -H)")
+        print opt.taxids.readline().rstrip() + "\t",
         if opt.use_names == 0:
             print "\t".join([r + "_id" for r in opt.ranks])
         elif opt.use_names == 1:
@@ -103,10 +105,9 @@ def main():
         elif opt.use_names == 2:
             print "\t".join(zipl([r + "_name" for r in opt.ranks], [r + "_id" for r in opt.ranks]))
 
-    for tid in opt.taxids: # loop taxids
-        tid=tid.rstrip()
+    for line in opt.taxids: # loop taxids
 
-        if not tid: # output a bunch of NAs
+        if not line: # output a bunch of NAs
             if not opt.use_names:
                 tids = [opt.na[0]] * len(opt.ranks)
             elif opt.use_names == 1:
@@ -118,9 +119,16 @@ def main():
             print "\t".join(str(x) for x in tids)
             continue
 
-        if opt.comment and tid[0] == opt.comment: # pass-through comment lines
-            print tid
+        if opt.comment and line[0] == opt.comment: # pass-through comment lines
+            print line
             continue
+
+        line=line.rstrip()
+        fields=line.split("\t")
+        tid=fields[-1]
+        line=line + "\t"
+        print line,
+        #tid=tid.rstrip()
 
         if not tid.isdigit(): # non-numeric value
             trans = ncbi.get_name_translator([tid])
