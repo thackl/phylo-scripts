@@ -107,18 +107,6 @@ def main():
 
     for line in opt.taxids: # loop taxids
 
-        if not line: # output a bunch of NAs
-            if not opt.use_names:
-                tids = [opt.na[0]] * len(opt.ranks)
-            elif opt.use_names == 1:
-                tids = [opt.na[1]] * len(opt.ranks)
-            elif opt.use_names == 2:
-                tids = [opt.na[0]] * len(opt.ranks)
-                tnames = [opt.na[1]] * len(opt.ranks)
-                tids = zipl(tnames, tids)
-            print "\t".join(str(x) for x in tids)
-            continue
-
         if opt.comment and line[0] == opt.comment: # pass-through comment lines
             print line
             continue
@@ -129,6 +117,19 @@ def main():
         line=line + "\t"
         print line,
         #tid=tid.rstrip()
+
+        # missing taxid, or taxid 0 (undef) or 1 (root)
+        if not tid or tid == "0" or tid == "1": # output a bunch of NAs
+            if not opt.use_names:
+                tids = [opt.na[0]] * len(opt.ranks)
+            elif opt.use_names == 1:
+                tids = [opt.na[1]] * len(opt.ranks)
+            elif opt.use_names == 2:
+                tids = [opt.na[0]] * len(opt.ranks)
+                tnames = [opt.na[1]] * len(opt.ranks)
+                tids = zipl(tnames, tids)
+            print "\t".join(str(x) for x in tids)
+            continue
 
         if not tid.isdigit(): # non-numeric value
             trans = ncbi.get_name_translator([tid])
