@@ -111,7 +111,7 @@ def main():
             print line
             continue
 
-        line=line.rstrip()
+        line=line.rstrip("\n")
         fields=line.split("\t")
         tid=fields[-1]
         line=line + "\t"
