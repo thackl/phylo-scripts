@@ -1,0 +1,50 @@
+#!/usr/bin/env perl
+# Created: 29 Dec 2018
+# Author: Thomas Hackl, thackl@lim4.de
+use warnings;
+use strict;
+use Getopt::Long  qw(:config no_ignore_case bundling);
+use Data::Dumper;
+use File::Temp qw/ tempfile tempdir /;
+
+GetOptions (
+    "min-length|l=f" => \(my $min_len),
+    "max-length|L=f" => \(my $max_len),
+    "cluster-similarity|c=f" => \(my $cls_sim),
+    "outlier-similarity|C=f" => \(my $olr_sim),
+    "out|o=s" => sub { '-' ne $_[1] and open(STDOUT, '>', $_[1]) || die $! },
+    "help|h!" => \(my $help),
+    "debug|D!" => \(my $debug),
+) or die("Error in command line arguments\n");
+
+if ($help || @ARGV > 2){
+    print "Usage: msa-trim.pl < in > out\n";
+    printf " %-19s  %s\n", "-l/--min-length", "remove sequences w/length < <x> fraction of median length";
+    printf " %-19s  %s\n", "-L/--max-length", "remove sequences w/length > <x> fraction of median length";
+    printf " %-19s  %s\n", "-c/--cluster-similarity", "only keep sequences with at most this much similarity";
+    printf " %-19s  %s\n", "-C/--outlier-similarity", "remove sequences with less than this similarity to any other sequence";
+    printf " %-19s  %s\n", "-o/--out", "write to this file [STDOUT]";
+    printf " %-19s  %s\n", "-h/--help", "show this help";
+    printf " %-19s  %s\n", "-D/--debug", "show debug messages";
+    exit 0;
+}
+
+my $fa_in = shift;
+if (!$fa_in || $fa_in eq '-') { # if input from stdin cache to temp file
+    my $fa_ih;
+    ($fa_ih, $fa_in) = tempfile(TEMPLATE => "msa-trim-in-XXXXXX", SUFFIX => ".fa", UNLINK => 1);
+    qx(cat - >$fa_in)
+}
+
+my ($fa_oh,$fa_tmp) = tempfile(TEMPLATE => "msa-trim-tmp-XXXXXX", SUFFIX => ".fa", UNLINK => 1);
+
+print STDERR "in: ",$fa_in,"\n";
+print STDERR "tmp: ",$fa_tmp,"\n";
+
+my $tcp = "";
+$tcp.= "_%%$cls_sim" if defined($cls_sim);
+$tcp.= "_O$olr_sim" if defined($olr_sim);
+    
+qx(esl-alimanip --outformat afa --lnfract $min_len --lxfract $max_len $fa_in > $fa_tmp);
+print qx(t_coffee -other_pg seq_reformat -in $fa_tmp -action +trim $tcp -action +rm_gap | seqkit seq -uw 80);
+
