@@ -19,8 +19,8 @@ GetOptions (
 
 if ($help || @ARGV > 2){
     print "Usage: msa-trim.pl < in > out\n";
-    printf " %-19s  %s\n", "-l/--min-length", "remove sequences w/length < <x> fraction of median length";
-    printf " %-19s  %s\n", "-L/--max-length", "remove sequences w/length > <x> fraction of median length";
+    printf " %-19s  %s\n", "-l/--min-length", "remove sequences w/length < <x> or <x> * median length for <x> <10";
+    printf " %-19s  %s\n", "-L/--max-length", "remove sequences w/length > <x> or <x> * median length for <x> <10";
     printf " %-19s  %s\n", "-c/--cluster-similarity", "only keep sequences with at most this much similarity";
     printf " %-19s  %s\n", "-C/--outlier-similarity", "remove sequences with less than this similarity to any other sequence";
     printf " %-19s  %s\n", "-o/--out", "write to this file [STDOUT]";
@@ -44,7 +44,51 @@ print STDERR "tmp: ",$fa_tmp,"\n";
 my $tcp = "";
 $tcp.= "_%%$cls_sim" if defined($cls_sim);
 $tcp.= "_O$olr_sim" if defined($olr_sim);
-    
-qx(esl-alimanip --outformat afa --lnfract $min_len --lxfract $max_len $fa_in > $fa_tmp);
+
+if ($min_len || $max_len) {
+    # for rel min/max infer abs values from median
+    my @len;
+    my @ids;
+    open(LEN, "seqkit seq -g $fa_in | seq-len |") or die $!;
+    while (<LEN>) {
+        chomp();
+        my($id,$len) = split("\t",$_);
+        push @ids, $id;
+        push @len, $len;
+    }
+    close LEN;
+    my $med_len = median(@len);
+    if (defined($min_len) && $min_len < 10){
+        $min_len = round($med_len * $min_len);
+        print STDERR "minimum length set to $min_len based on median length $med_len\n";
+    }
+    if (defined($max_len) && $max_len < 10){
+        $max_len = round($med_len * $max_len);
+        print STDERR "maximum length set to $max_len based on median length $med_len\n";
+    }
+
+    my @keep;
+    $max_len ||= 100_000_000_000;
+    $min_len ||= 0;
+    for (my $i=0; $i<@ids; $i++) {
+        push @keep, $ids[$i] if $len[$i] >= $min_len && $len[$i] <= $max_len;
+    }
+
+    my ($ids_oh,$ids_tmp) = tempfile(TEMPLATE => "msa-ids-tmp-XXXXXX", SUFFIX => ".fa", UNLINK => 1);
+    print $ids_oh "$_\n" for @keep;
+    qx(seqkit grep -f $ids_tmp $fa_in > $fa_tmp);
+}else {
+    $fa_tmp = $fa_in;
+}
+
+print STDERR qx(seqkit stats $fa_tmp);
 print qx(t_coffee -other_pg seq_reformat -in $fa_tmp -action +trim $tcp -action +rm_gap | seqkit seq -uw 80);
 
+sub sum{my $x; $x+= $_ for @_; $x;}
+sub mean{sum(@_)/@_;}
+sub round{int($_[0] + .5);}
+sub median{
+    $#_%2
+        ? round(mean((sort{$a <=> $b}@_)[($#_-1)/2,($#_+1)/2]))
+        : (sort{$a <=> $b}@_)[$#_/2];
+}
