@@ -18,7 +18,6 @@ use constant {
 };
 
 GetOptions (
-    "targets|t=s" => \(my $opt_targets = "16S,ITS"),
     "strip|s!" => \(my $opt_strip = 1),
     "id-prefix|p=s" => \(my $opt_id),
     "barrnap-opt|B=s" => \(my $opt_barrnap = "--quiet"),
@@ -33,7 +32,6 @@ if ($opt_help || @ARGV==0){
     print "Runs barrnap or parses precomputed gff.\n\n";
 
     print "Usage: ".(basename($0))." [options] { .fa | .fa .gff | .gff-with-seq } > rRNAs.fa\n";
-    printf " %-19s  %s\n", "-t/--targets", "rRNAs and spacer to extract [$opt_targets]";
     printf " %-19s  %s\n", "-s/--strip", "try to strip contig counter from end of sequence IDs used as prefixes [ON]";
     printf " %-19s  %s\n", "-p/--id-prefix", "ID prefix for the extracted sequence [<contig(stripped)>-<target>]";
     printf " %-19s  %s\n", "-l/--ITS-min-length", "Ignore ITS annotated shorter than [$opt_min_length]";
@@ -80,22 +78,6 @@ $debug && print STDERR Dumper({fa_file => $fa_file, gff_file => $gff_file, bundl
 
 
 ##----------------------------------------------------------------------------##
-# prep targets
-my @targets_all = qw(5S 16S 23S ITS);
-my %targets;
-
-for my $t (split(',', $opt_targets )) {
-    die "Unknown target $t - aborting\nChoices: ".(join(",", @targets_all))."\n" unless grep{$t eq $_}@targets_all;
-    $t =~ s/(\d+S)$/$1-rRNA/;
-    $t =~ s/ITS/16S-23S-ITS/;
-
-    $targets{$t}++;
-}
-
-$debug && print STDERR Dumper(\%targets);
-print STDERR "Searching for ", join(", ", keys %targets), "\n";
-
-##----------------------------------------------------------------------------##
 # read input
 my %T;
 my @S;
@@ -113,12 +95,9 @@ while (<GFF>) {
 
     $r[start] -= 1; # 0-offset
     $r[len] = $r[end] - $r[start];
-    ($r[target]) = $r[attributes] =~ /(\b\d+S\b).*RNA/;
+    ($r[target]) = $r[attributes] =~ /(\b(?:\d|\d\.\d|\d\d)S\b).*RNA/;
     $r[target].= '-rRNA';
-    # store all rRNAs (ITS needs 16S/23S even if not targets
-    # $debug && print STDERR Dumper(\@r);
-    # only count targets and dependencies
-    # $found_c++ if($targets{$1} or ($targets{ITS} && grep{$1}qw(16S 23S))); # TODO: untested
+    $r[target] =~ s/\./_/;
     unless (exists $T{$r[seqid]}){
         $T{$r[seqid]} = [];
         push @S, $r[seqid];
@@ -135,37 +114,85 @@ $debug && print STDERR Dumper(\%T);
 # sort and analyze matched targets
 while (my($k, $v) = each %T) { # per contig, sort by coords (to be sure)
     @$v = sort{$a->[start] <=> $b->[start]}@$v;
-    if (exists $targets{'16S-23S-ITS'}) { # need to organize rRNA's into consistent cluster to extract ITS properly
-        my @ITSs;
-        # for each 16S, find adjacent 23S (dir deps on strand, not too far away)
-        for (my $i=0; $i<@$v; $i++) {
-            my @s16 = @{$v->[$i]};
-            next if $s16[target] ne '16S-rRNA';
-            my $j = $s16[strand] eq '+' ? $i+1 : $i-1;
-            next if ($j<0 || $j>$#$v); # outside seq
-            my @s23 = @{$v->[$j]};
-            next if $s23[target] ne '23S-rRNA' || # 23S not adjacent
-                $s23[strand] ne $s16[strand]; # 16S and 23S not same strand
-            my $dist = $s16[strand] eq '+'
-                ? $s23[start] - $s16[end]
-                : $s16[start] - $s23[end];
+    my @ITSs;
+    # for each 16S, find adjacent 23S (dir deps on strand, not too far away)
+    # same for 18S-5.8S-28S
+    for (my $i=0; $i<@$v; $i++) {
+        my @s1 = @{$v->[$i]};
+        next unless $s1[target] =~ /(16|5_8)S-rRNA/;
+        my $idown = $s1[strand] eq '+' ? $i+1 : $i-1;
+        my $iup = $s1[strand] eq '+' ? $i-1 : $i+1;
+        my @s0; # 18S
+        my @s2; # 23S/28S
+        unless ($idown<0 || $idown>$#$v){ # outside seq
+            @s2 = @{$v->[$idown]};
+        }
+        unless ($iup<0 || $iup>$#$v){ # outside seq
+            @s0 = @{$v->[$iup]};
+        }
+        if ( $s1[target] eq '16S-rRNA') {
+            next unless $s2[target] eq '23S-rRNA' || # 23S not adjacent
+                $s2[strand] ne $s1[strand];     # 16S and 23S not same strand
+            my $dist = $s1[strand] eq '+'
+                ? $s2[start] - $s1[end]
+                : $s1[start] - $s2[end];
             next if $dist > $opt_max_length;
 
             # OK, this looks like a proper cluster
-            my @ITS = @s16;
+            my @ITS = @s1;
             $ITS[type] = 'ITS';
-            $ITS[attributes] = 'Name=16S-23S-ITS;product=16S-23S internal transcribed spacer';
+            $ITS[attributes] = 'Name=16S-23S-ITS;product=16S-23S internal transcribed spacer (ITS)';
             $ITS[target] = '16S-23S-ITS';
-            ($ITS[start], $ITS[end]) = $s16[strand] eq "+"
-                ? ($s16[end], $s23[start])
-                : ($s23[end], $s16[start]);
+            ($ITS[start], $ITS[end]) = $s1[strand] eq "+"
+                ? ($s1[end], $s2[start])
+                : ($s2[end], $s1[start]);
             $ITS[len] = $ITS[end] - $ITS[start];
             push @ITSs, \@ITS;
+        }elsif ( $s1[target] eq '5_8S-rRNA') {
+            warn "\n", "!"x80, "\n", "OK, this sort of works, BUT barrnap likes to annotate 28S as ".
+                "28S+5.8S including spacer - so finding the ITS2 this way often fails!!\n", "!"x80, "\n\n";
+            if ($s0[target] eq '18S-rRNA' ||   # 18S not adjacent downstream
+                $s0[strand] ne $s1[strand]){   # not on same strand
+                my $dist = $s1[strand] eq '+'
+                    ? $s1[start] - $s0[end]
+                    : $s0[start] - $s1[end];
+                next if $dist > $opt_max_length;
+
+                # OK, this looks like a proper cluster
+                my @ITS = @s1;
+                $ITS[type] = 'ITS';
+                $ITS[attributes] = 'Name=18S-5_8S-ITS1;product=18S-5_8S internal transcribed spacer (ITS1)';
+                $ITS[target] = '18S-5_8S-ITS1';
+                ($ITS[start], $ITS[end]) = $s1[strand] eq "+"
+                    ? ($s0[end], $s1[start])
+                    : ($s1[end], $s0[start]);
+                $ITS[len] = $ITS[end] - $ITS[start];
+                push @ITSs, \@ITS;
+            }
+            if ($s2[target] eq '28S-rRNA' ||    # 28S not adjacent upstream
+                $s2[strand] ne $s1[strand]){    # not on same strand
+                my $dist = $s1[strand] eq '+'
+                    ? $s2[start] - $s1[end]
+                    : $s1[start] - $s2[end];
+                next if $dist > $opt_max_length;
+
+                # OK, this looks like a proper cluster
+                my @ITS = @s1;
+                $ITS[type] = 'ITS';
+                $ITS[attributes] = 'Name=5_8S-28S-ITS2;product=5_8S-28S internal transcribed spacer 2 (ITS2)';
+                $ITS[target] = '5_8S-28S-ITS2';
+                ($ITS[start], $ITS[end]) = $s1[strand] eq "+"
+                ? ($s1[end], $s2[start])
+                : ($s2[end], $s1[start]);
+                $ITS[len] = $ITS[end] - $ITS[start];
+                push @ITSs, \@ITS;
+            }
         }
-        # add ITS annotation, and sort by coords;
-        push @$v, @ITSs;
-        @$v = sort{$a->[start] <=> $b->[start]}@$v;
     }
+
+    # add ITS annotation, and sort by coords;
+    push @$v, @ITSs;
+    @$v = sort{$a->[start] <=> $b->[start]}@$v;
 } # end ITS
 
 $debug && print STDERR Dumper(\%T);
@@ -176,7 +203,6 @@ $debug && print STDERR Dumper(\%T);
 my %found;
 foreach (@S) {
     foreach my $r (@{$T{$_}}){
-        next unless exists $targets{$r->[target]};
 
         # need a unique ID, accounting for cluster-copies
         my $id;
@@ -216,7 +242,6 @@ if ($bundled) {
 while (my $fs = $fp->next_seq) {
     if ($T{$fs->id}) {
          foreach my $t (@{$T{$fs->id}}) {
-             next unless exists $targets{$t->[target]};
              my $ts = $fs->substr_seq($t->[start], $t->[len]); # perl coords 0-offset
              my $id;
              $ts->id($t->[id]);
